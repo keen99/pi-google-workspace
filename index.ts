@@ -1119,6 +1119,144 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "google_sheets_batch_update",
+    label: "Google Sheets Batch Update",
+    description: [
+      "Execute one or more Google Sheets batchUpdate requests atomically (all-or-nothing: any error rolls back all).",
+      "",
+      "Body shape: { requests: [Request, ...] } where each Request is a wrapped object like { addSheet: { ... } }.",
+      "Pass the requests array via the `requests` parameter; the tool wraps it.",
+      "",
+      "Grid ranges use sheetId (numeric tab id from google_sheets_list_tabs), NOT sheet title. Indices are zero-based half-open [start, end).",
+      "dimension: \"ROWS\" | \"COLUMNS\".",
+      "",
+      "Common request shapes (elements of requests array):",
+      "",
+      "Sheet management:",
+      "- Add sheet: { addSheet: { properties: { title: \"Name\", tabColor: { red: 1, green: 0, blue: 0 } } } }",
+      "- Delete sheet: { deleteSheet: { sheetId: 123 } }",
+      "- Rename sheet: { updateSheetProperties: { properties: { sheetId: 123, title: \"New\" }, fields: \"title\" } }",
+      "- Freeze rows/cols: { updateSheetProperties: { properties: { sheetId: 123, gridProperties: { frozenRowCount: 2, frozenColumnCount: 1 } }, fields: \"gridProperties.frozenRowCount,gridProperties.frozenColumnCount\" } }",
+      "- Hide gridlines: { updateSheetProperties: { properties: { sheetId: 123, gridProperties: { hideGridlines: true } }, fields: \"gridProperties.hideGridlines\" } }",
+      "- Tab color: { updateSheetProperties: { properties: { sheetId: 123, tabColor: { red: 1 } }, fields: \"tabColor\" } }",
+      "- Duplicate: { duplicateSheet: { sourceSheetId: 123, insertSheetIndex: 1, newSheetName: \"Copy\" } }",
+      "",
+      "Dimensions:",
+      "- Insert rows: { insertDimension: { range: { sheetId, dimension: \"ROWS\", startIndex: 5, endIndex: 10 }, inheritFromBefore: false } }",
+      "- Insert cols: { insertDimension: { range: { sheetId, dimension: \"COLUMNS\", startIndex: 2, endIndex: 4 } } }",
+      "- Delete rows/cols: { deleteDimension: { range: { sheetId, dimension: \"ROWS\", startIndex: 5, endIndex: 10 } } }",
+      "- Move rows: { moveDimension: { source: { sheetId, dimension: \"ROWS\", startIndex: 5, endIndex: 10 }, destinationIndex: 20 } }",
+      "- Auto-resize cols: { autoResizeDimensions: { dimensions: { sheetId, dimension: \"COLUMNS\", startIndex: 0, endIndex: 5 } } }",
+      "- Col width: { updateDimensionProperties: { range: { sheetId, dimension: \"COLUMNS\", startIndex: 0, endIndex: 3 }, properties: { pixelSize: 120 }, fields: \"pixelSize\" } }",
+      "- Hide row/col: { updateDimensionProperties: { range: { sheetId, dimension: \"ROWS\", startIndex: 5, endIndex: 10 }, properties: { hiddenByUser: true }, fields: \"hiddenByUser\" } }",
+      "",
+      "Cells / values / formatting:",
+      "- Write values+format to range: { updateCells: { range: { sheetId, startRowIndex, endRowIndex, startColumnIndex, endColumnIndex }, rows: [{ values: [{ userEnteredValue: \"42\", userEnteredFormat: { numberFormat: { type: \"CURRENCY\" } } }] }], fields: \"userEnteredValue,userEnteredFormat\" } }",
+      "- Repeat cell (format whole range): { repeatCell: { range: { sheetId, startRowIndex, endRowIndex, startColumnIndex, endColumnIndex }, cell: { userEnteredFormat: { numberFormat: { type: \"CURRENCY\", pattern: \"$#,##0.00\" }, backgroundColor: { red: 1, green: 0.9, blue: 0.9 }, textFormat: { bold: true, fontSize: 12 }, horizontalAlignment: \"CENTER\" } }, fields: \"userEnteredFormat\" } }",
+      "- Borders: { updateBorders: { range: {...}, top: { style: \"SOLID_THIN\" }, bottom: { style: \"SOLID_THIN\" }, left: { style: \"SOLID_THIN\" }, right: { style: \"SOLID_THIN\" } } } (styles: SOLID, DASHED, DOTTED, SOLID_MEDIUM, SOLID_THICK, DOUBLE)",
+      "- Merge: { mergeCells: { range: {...}, mergeType: \"MERGE_ALL\" } } (types: MERGE_ALL, MERGE_COLUMNS, MERGE_ROWS, MERGE_VERTICAL, MERGE_HORIZONTAL)",
+      "- Unmerge: { unmergeCells: { range: {...} } }",
+      "- Trim whitespace: { trimWhitespace: { range: {...} } }",
+      "- Copy-paste (values+format): { copyPaste: { source: {...}, destination: {...}, pasteType: \"PASTE_NORMAL\" } } (pasteTypes: PASTE_NORMAL, PASTE_VALUES, PASTE_FORMAT, PASTE_NO_BORDERS, PASTE_FORMULA)",
+      "- Cut-paste: { cutPaste: { source: {...}, destination: { sheetId, startRowIndex, startColumnIndex } } }",
+      "- Sort range: { sortRange: { range: {...}, sortSpecs: [{ dimensionIndex: 0, sortOrder: \"ASCENDING\" }] } }",
+      "- Randomize: { randomizeRange: { range: {...} } }",
+      "- Autofill: { autoFill: { source: {...}, destination: {...}, useAlternateSeries: false } }",
+      "",
+      "Data validation (dropdowns, rules):",
+      "- Dropdown from list: { setDataValidation: { range: {...}, rule: { condition: { type: \"ONE_OF_LIST\", values: [{ userEnteredValue: \"Yes\" }, { userEnteredValue: \"No\" }] }, showCustomUi: true } } }",
+      "- Checkbox: { setDataValidation: { range: {...}, rule: { condition: { type: \"BOOLEAN\" }, render_data: { } } } }",
+      "- Number rule: { setDataValidation: { range: {...}, rule: { condition: { type: \"NUMBER_GREATER_THAN\", values: [{ userEnteredValue: \"0\" }] } } } }",
+      "- Date rule: { setDataValidation: { range: {...}, rule: { condition: { type: \"DATE_IS_VALID\" } } } }",
+      "- Clear validation: { deleteDataValidation: { range: {...} } }",
+      "",
+      "Conditional formatting:",
+      "- Text equals: { addConditionalFormatRule: { rule: { ranges: [{...}], booleanRule: { condition: { type: \"TEXT_EQ\", values: [{ userEnteredValue: \"DONE\" }] }, format: { backgroundColor: { red: 0.8 } } } }, index: 0 } }",
+      "- Cell not empty: { addConditionalFormatRule: { rule: { ranges: [{...}], booleanRule: { condition: { type: \"NOT_BLANK\" }, format: { textFormat: { bold: true } } } }, index: 0 } }",
+      "- Color scale: { addConditionalFormatRule: { rule: { ranges: [{...}], gradientRule: { minpoint: { color: { red: 1 }, type: \"MIN\" }, maxpoint: { color: { green: 1 }, type: \"MAX\" } } }, index: 0 } }",
+      "- Update rule: { updateConditionalFormatRule: { index: 0, rule: {...} } } (or { index, newIndex } to reorder)",
+      "- Delete rule: { deleteConditionalFormatRule: { sheetId, index: 0 } }",
+      "",
+      "Objects:",
+      "- Named range: { addNamedRange: { namedRange: { name: \"MyRange\", range: { sheetId, startRowIndex, endRowIndex, startColumnIndex, endColumnIndex } } } }",
+      "- Delete named range: { deleteNamedRange: { namedRangeId: \"...\" } }",
+      "- Protected range: { addProtectedRange: { protectedRange: { range: {...}, description: \"Locked\", editors: { users: [\"user@email.com\"] } } } }",
+      "- Delete protected range: { deleteProtectedRange: { protectedRangeId: \"...\" } }",
+      "- Banding (alt colors): { addBanding: { bandedRange: { range: {...}, rowProperties: { headerColor: {...}, firstBandColor: {...}, secondBandColor: {...} } } } }",
+      "- Filter view: { addFilterView: { filter: { title: \"MyFilter\", range: {...} } } }",
+      "- Set basic filter: { setBasicFilter: { filter: { range: {...} } } }",
+      "- Clear basic filter: { clearBasicFilter: { sheetId: 123 } }",
+      "- Chart (column): { addChart: { chart: { spec: { title: \"Sales\", basicChart: { chartType: \"COLUMN\", domains: [{ domain: { sourceRange: { sources: [{ sheetId, startRowIndex, endRowIndex, startColumnIndex, endColumnIndex }] } } }], series: [{ series: { sourceRange: { sources: [...] } } }] } }, position: { overlayPosition: { anchorCell: { sheetId, rowIndex: 0, columnIndex: 0 } } } } } }",
+      "- Delete chart/embedded object: { deleteEmbeddedObject: { objectId: 123 } }",
+      "",
+      "Find and replace:",
+      "- { findReplace: { find: \"old\", replacement: \"new\", matchCase: false, allSheets: true } }",
+      "- Scoped to one sheet: { findReplace: { find: \"old\", replacement: \"new\", sheetId: 123 } }",
+      "- Regex mode: { findReplace: { find: \"\\\\d{4}\", replacement: \"XXXX\", matchCase: false, useRegularExpression: true, allSheets: true } }",
+      "- Search formulas only: { findReplace: { find: \"...\", matchEntireCell: true, searchFormulas: true, allSheets: true } }",
+      "",
+      "Developer metadata:",
+      "- Set on range: { createDeveloperMetadata: { developerMetadata: { metadataId: 1, metadataKey: \"tag\", metadataValue: \"v1\", location: { dimensionRange: { sheetId, dimension: \"ROWS\", startIndex, endIndex } }, visibility: \"DOCUMENT\" } } }",
+      "",
+      "NOT covered by batchUpdate (use other tools/endpoints): values.get/update/append/clear, copyTo (cross-spreadsheet sheet copy), spreadsheet.get metadata.",
+      "",
+      "Full request reference: https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request",
+      "",
+      "GridRange shape (used by most requests): { sheetId, startRowIndex?, endRowIndex?, startColumnIndex?, endColumnIndex? }. Row/col indices zero-based, end is exclusive.",
+      "Colors: { red, green, blue } floats 0..1 (plus optional alpha).",
+      "Pass `responseIncludeGridData: true` to get cell data back in response (larger payload).",
+    ].join("\n"),
+    promptSnippet: "Run Google Sheets batchUpdate (formats, validations, merges, sheet ops, find/replace, charts, protected ranges).",
+    parameters: Type.Object({
+      spreadsheetId: Type.String({ description: "Spreadsheet ID" }),
+      requests: Type.Array(Type.Any(), { description: "Array of batchUpdate Request objects. Each is { <opName>: { ... } }." }),
+      responseIncludeGridData: Type.Optional(Type.Boolean({ description: "If true, response includes updated cell data. Defaults false (smaller payload)." })),
+      responseRanges: Type.Optional(Type.Array(Type.String(), { description: "Optional list of A1 ranges to include in response when responseIncludeGridData is true." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const query: Record<string, string | number | boolean | undefined> = {};
+      if (params.responseIncludeGridData) query.responseIncludeGridData = true;
+      if (Array.isArray(params.responseRanges) && params.responseRanges.length > 0) {
+        query.ranges = params.responseRanges.join(",");
+      }
+
+      const data = await googleRequest(`/v4/spreadsheets/${encodeURIComponent(params.spreadsheetId)}:batchUpdate`, {
+        method: "POST",
+        query,
+        body: { requests: params.requests },
+        signal,
+      });
+
+      const replies = Array.isArray(data.replies) ? data.replies : [];
+      const lines = [
+        `Batch update complete`,
+        `- spreadsheetId: ${params.spreadsheetId}`,
+        `- requests: ${params.requests.length}`,
+        `- replies: ${replies.length}`,
+      ];
+
+      const addSheet = replies.find((r) => (r as JsonMap)?.addSheet);
+      if (addSheet) {
+        const props = ((addSheet as JsonMap).addSheet as JsonMap)?.properties as JsonMap | undefined;
+        if (props) {
+          lines.push(`- new sheet: ${typeof props.title === "string" ? props.title : "?"} (sheetId: ${typeof props.sheetId === "number" ? props.sheetId : "?"})`);
+        }
+      }
+
+      const findReplace = replies.find((r) => (r as JsonMap)?.findReplace);
+      if (findReplace) {
+        const fr = (findReplace as JsonMap).findReplace as JsonMap | undefined;
+        lines.push(`- find/replace: ${typeof fr?.valuesChanged === "number" ? fr.valuesChanged : 0} value(s) changed`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { spreadsheetId: params.spreadsheetId, requestCount: params.requests.length, replies },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "google_docs_read",
     label: "Google Docs Read",
     description: "Read text content from a Google Docs document.",
