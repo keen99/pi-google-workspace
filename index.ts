@@ -1033,6 +1033,56 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "google_sheets_list_tabs",
+    label: "Google Sheets List Tabs",
+    description: "List sheets/tabs in a spreadsheet with their titles, ids, index, and dimensions.",
+    promptSnippet: "List spreadsheet tabs/sheets by spreadsheetId.",
+    parameters: Type.Object({
+      spreadsheetId: Type.String({ description: "Spreadsheet ID" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const data = await googleRequest(`/v4/spreadsheets/${encodeURIComponent(params.spreadsheetId)}`, {
+        query: { fields: "spreadsheetId,spreadsheetUrl,properties.title,sheets(properties)" },
+        signal,
+      });
+
+      const sheets = Array.isArray(data.sheets) ? (data.sheets as JsonMap[]) : [];
+      const tabs = sheets.map((sheet) => {
+        const props = (sheet.properties as JsonMap | undefined) ?? {};
+        return {
+          sheetId: typeof props.sheetId === "number" ? props.sheetId : null,
+          title: typeof props.title === "string" ? props.title : "(unnamed)",
+          index: typeof props.index === "number" ? props.index : null,
+          sheetType: typeof props.sheetType === "string" ? props.sheetType : null,
+          gridProperties: props.gridProperties as JsonMap | undefined,
+          hidden: props.hidden === true,
+        };
+      });
+
+      const lines = tabs.map((tab) => {
+        const grid = tab.gridProperties as JsonMap | undefined;
+        const rows = typeof grid?.rowCount === "number" ? grid.rowCount : "?";
+        const cols = typeof grid?.columnCount === "number" ? grid.columnCount : "?";
+        const flag = tab.hidden ? " [hidden]" : "";
+        return `- ${tab.title}${flag}\n  - sheetId: ${tab.sheetId}\n  - index: ${tab.index}\n  - grid: ${rows} rows × ${cols} cols`;
+      });
+
+      const title = typeof (data.properties as JsonMap | undefined)?.title === "string" ? (data.properties as JsonMap).title as string : params.spreadsheetId;
+      const url = typeof data.spreadsheetUrl === "string" ? data.spreadsheetUrl : "";
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# ${title}\n${url ? `- url: ${url}\n` : ""}Tabs (${tabs.length}):\n${lines.length > 0 ? lines.join("\n") : "No sheets found."}`,
+          },
+        ],
+        details: { spreadsheetId: params.spreadsheetId, title, spreadsheetUrl: url, tabs },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "google_sheets_update_values",
     label: "Google Sheets Update Values",
     description: "Update a range in Google Sheets.",

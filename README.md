@@ -128,6 +128,7 @@ If `refresh_token` is missing (or scopes changed), run `/gws-setup` again and re
 - `google_sheets_create`
 - `google_sheets_read`
 - `google_sheets_update_values`
+- `google_sheets_list_tabs` (keen99 fork)
 
 ### Slides
 - `google_slides_read`
