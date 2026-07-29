@@ -1257,6 +1257,160 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "google_sheets_add_chart",
+    label: "Google Sheets Add Chart",
+    description: [
+      "Add a chart to a Google Sheet via the Sheets API addChart request (uses batchUpdate under the hood).",
+      "",
+      "Supports simple chart types: COLUMN, BAR, LINE, AREA, PIE, SCATTER.",
+      "For combo/3D/pivot/styled charts, use google_sheets_batch_update with a raw addChart request instead.",
+      "",
+      "Data layout assumption (Excel-like):",
+      "- First column of dataRange = labels (categories or X axis). Set headerRow=true if first row of dataRange is a header.",
+      "- Remaining columns = one series each.",
+      "- Example dataRange (A1:C4, headerRow=true): A=Month, B=Revenue, C=Costs → 2 series (Revenue, Costs) plotted per Month.",
+      "",
+      "For PIE: only first label column + first value column used.",
+      "For SCATTER: all non-label columns become X/Y pairs? No - first non-label column = X, second = Y. Use batch_update raw for multi-series scatter.",
+      "",
+      "Anchor: chart overlays the sheet starting at anchorCell (A1 notation on the target sheet, e.g. \"E2\").",
+    ].join("\n"),
+    promptSnippet: "Add a chart (column/bar/line/area/pie/scatter) to a sheet from a data range.",
+    parameters: Type.Object({
+      spreadsheetId: Type.String({ description: "Spreadsheet ID" }),
+      sheetId: Type.Integer({ description: "Numeric sheet/tab id (from google_sheets_list_tabs)" }),
+      chartType: Type.String({
+        description: 'Chart type: COLUMN | BAR | LINE | AREA | PIE | SCATTER',
+      }),
+      title: Type.Optional(Type.String({ description: "Chart title" })),
+      dataRange: Type.Object({
+        startRowIndex: Type.Integer({ description: "Zero-based, inclusive" }),
+        endRowIndex: Type.Integer({ description: "Zero-based, exclusive (one past last)" }),
+        startColumnIndex: Type.Integer({ description: "Zero-based, inclusive" }),
+        endColumnIndex: Type.Integer({ description: "Zero-based, exclusive" }),
+      }),
+      headerRow: Type.Optional(Type.Boolean({ description: "If true, first row of dataRange = series names (legend). Default true." })),
+      anchorCell: Type.Object({
+        rowIndex: Type.Integer({ description: "Zero-based row where chart overlays" }),
+        columnIndex: Type.Integer({ description: "Zero-based column where chart overlays" }),
+      }),
+      xLabel: Type.Optional(Type.String({ description: "Horizontal axis title (ignored for PIE)" })),
+      yLabel: Type.Optional(Type.String({ description: "Vertical axis title (ignored for PIE)" })),
+      stacked: Type.Optional(Type.Boolean({ description: "Stack series (COLUMN/BAR/AREA only). Default false." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const useHeader = params.headerRow ?? true;
+      const labelDomainEnd = params.dataRange.startColumnIndex + 1;
+      const seriesStart = labelDomainEnd;
+      const numSeries = Math.max(0, params.dataRange.endColumnIndex - seriesStart);
+
+      if (numSeries < 1) {
+        throw new Error("dataRange must include at least 1 label column and 1 value column.");
+      }
+
+      const labelRange = {
+        sheetId: params.sheetId,
+        startRowIndex: params.dataRange.startRowIndex,
+        endRowIndex: params.dataRange.endRowIndex,
+        startColumnIndex: params.dataRange.startColumnIndex,
+        endColumnIndex: labelDomainEnd,
+      };
+
+      const seriesDefs: JsonMap[] = [];
+      const pieSeriesCount = params.chartType.toUpperCase() === "PIE" ? Math.min(1, numSeries) : numSeries;
+      for (let i = 0; i < pieSeriesCount; i++) {
+        const colStart = seriesStart + i;
+        seriesDefs.push({
+          series: {
+            sourceRange: {
+              sources: [
+                {
+                  sheetId: params.sheetId,
+                  startRowIndex: params.dataRange.startRowIndex,
+                  endRowIndex: params.dataRange.endRowIndex,
+                  startColumnIndex: colStart,
+                  endColumnIndex: colStart + 1,
+                },
+              ],
+            },
+          },
+          targetAxis: params.chartType.toUpperCase() === "SCATTER" ? (i === 0 ? "LEFT_AXIS" : "BOTTOM_AXIS") : undefined,
+        });
+      }
+
+      const basicChart: JsonMap = {
+        chartType: params.chartType.toUpperCase(),
+        domains: [
+          {
+            domain: { sourceRange: { sources: [labelRange] } },
+            reversed: false,
+          },
+        ],
+        series: seriesDefs,
+        axis: [
+          { position: "BOTTOM_AXIS", title: params.xLabel ?? "" },
+          { position: "LEFT_AXIS", title: params.yLabel ?? "" },
+        ],
+        legendPosition: "RIGHT_LEGEND",
+        headerCount: useHeader ? 1 : 0,
+      };
+
+      if (params.stacked && ["COLUMN", "BAR", "AREA"].includes(params.chartType.toUpperCase())) {
+        basicChart.stackedType = "STACKED";
+      }
+      if (params.chartType.toUpperCase() === "PIE") {
+        delete (basicChart as { axis?: unknown }).axis;
+      }
+
+      const chart: JsonMap = {
+        spec: {
+          title: params.title ?? "",
+          basicChart,
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: {
+              sheetId: params.sheetId,
+              rowIndex: params.anchorCell.rowIndex,
+              columnIndex: params.anchorCell.columnIndex,
+            },
+          },
+        },
+      };
+
+      const data = await googleRequest(`/v4/spreadsheets/${encodeURIComponent(params.spreadsheetId)}:batchUpdate`, {
+        method: "POST",
+        body: { requests: [{ addChart: { chart } }] },
+        signal,
+      });
+
+      const replies = Array.isArray(data.replies) ? (data.replies as JsonMap[]) : [];
+      const addChartReply = replies.find((r) => (r as JsonMap)?.addChart);
+      const chartId = addChartReply ? ((addChartReply as JsonMap).addChart as JsonMap)?.chartId : undefined;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: [
+              `Chart added`,
+              `- spreadsheetId: ${params.spreadsheetId}`,
+              `- sheetId: ${params.sheetId}`,
+              `- type: ${params.chartType.toUpperCase()}`,
+              `- series: ${pieSeriesCount}`,
+              `- anchor: row ${params.anchorCell.rowIndex}, col ${params.anchorCell.columnIndex}`,
+              `${chartId !== undefined ? `- chartId: ${chartId}` : ""}`,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          },
+        ],
+        details: { spreadsheetId: params.spreadsheetId, sheetId: params.sheetId, chartId, chartType: params.chartType.toUpperCase() },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "google_docs_read",
     label: "Google Docs Read",
     description: "Read text content from a Google Docs document.",
