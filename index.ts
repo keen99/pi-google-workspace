@@ -1426,7 +1426,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, signal) {
       const fields = [
-        "sheets(data(charts,pivotTables),properties(sheetId,title,index))",
+        "sheets(properties(sheetId,title),charts)",
         "spreadsheetId",
       ].join(",");
 
@@ -1445,10 +1445,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
 
         if (params.sheetId !== undefined && sheetId !== params.sheetId) continue;
 
-        const dataArray = (sheet.data as JsonMap[] | undefined) ?? [{}];
-        const grid = (dataArray[0] as JsonMap | undefined) ?? {};
-
-        const charts = Array.isArray(grid.charts) ? (grid.charts as JsonMap[]) : [];
+        const charts = Array.isArray(sheet.charts) ? (sheet.charts as JsonMap[]) : [];
         for (const chart of charts) {
           const spec = (chart.spec as JsonMap | undefined) ?? {};
           const basicChart = (spec.basicChart as JsonMap | undefined) ?? {};
@@ -1469,11 +1466,6 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
             anchorRow: typeof anchor.rowIndex === "number" ? anchor.rowIndex : null,
             anchorCol: typeof anchor.columnIndex === "number" ? anchor.columnIndex : null,
           });
-        }
-
-        const pivots = Array.isArray(grid.pivotTables) ? (grid.pivotTables as JsonMap[]) : [];
-        for (const _pivot of pivots) {
-          objects.push({ kind: "pivot_table", sheetId, sheetTitle });
         }
       }
 
