@@ -1480,7 +1480,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
       const lines = objects.map((obj) => {
         if (obj.kind === "chart") {
           return [
-            `- chart \`${obj.title || "(untitled)\"}`,
+            `- chart \`${obj.title || "(untitled)"}\``,
             `  - objectId: ${obj.objectId}`,
             `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
             `  - type: ${obj.chartType ?? "?"}`,
