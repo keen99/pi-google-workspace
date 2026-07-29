@@ -1411,6 +1411,101 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "google_sheets_list_objects",
+    label: "Google Sheets List Objects",
+    description: [
+      "List embedded objects (charts, images, pivot tables, drawings) on a sheet, or all sheets.",
+      "Returns objectId (chartId/embeddedObjectId) needed for deleteEmbeddedObject in google_sheets_batch_update.",
+      "Also returns chart type, title, anchor cell, and series count when available.",
+      "Use this before deleting charts via batch_update deleteEmbeddedObject.",
+    ].join("\n"),
+    promptSnippet: "List charts/images/pivot tables on a sheet; returns objectIds for deletion.",
+    parameters: Type.Object({
+      spreadsheetId: Type.String({ description: "Spreadsheet ID" }),
+      sheetId: Type.Optional(Type.Integer({ description: "Optional sheet/tab id to filter. Omit for all sheets." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const fields = [
+        "sheets(data(charts,pivotTables),properties(sheetId,title,index))",
+        "spreadsheetId",
+      ].join(",");
+
+      const data = await googleRequest(`/v4/spreadsheets/${encodeURIComponent(params.spreadsheetId)}`, {
+        query: { fields },
+        signal,
+      });
+
+      const sheets = Array.isArray(data.sheets) ? (data.sheets as JsonMap[]) : [];
+      const objects: JsonMap[] = [];
+
+      for (const sheet of sheets) {
+        const props = (sheet.properties as JsonMap | undefined) ?? {};
+        const sheetId = typeof props.sheetId === "number" ? props.sheetId : null;
+        const sheetTitle = typeof props.title === "string" ? props.title : "?";
+
+        if (params.sheetId !== undefined && sheetId !== params.sheetId) continue;
+
+        const dataArray = (sheet.data as JsonMap[] | undefined) ?? [{}];
+        const grid = (dataArray[0] as JsonMap | undefined) ?? {};
+
+        const charts = Array.isArray(grid.charts) ? (grid.charts as JsonMap[]) : [];
+        for (const chart of charts) {
+          const spec = (chart.spec as JsonMap | undefined) ?? {};
+          const basicChart = (spec.basicChart as JsonMap | undefined) ?? {};
+          const pos = (chart.position as JsonMap | undefined) ?? {};
+          const overlay = (pos.overlayPosition as JsonMap | undefined) ?? {};
+          const anchor = (overlay.anchorCell as JsonMap | undefined) ?? {};
+          const series = Array.isArray(basicChart.series) ? (basicChart.series as JsonMap[]) : [];
+
+          objects.push({
+            kind: "chart",
+            chartId: typeof chart.chartId === "number" ? chart.chartId : null,
+            objectId: typeof chart.chartId === "number" ? chart.chartId : null,
+            sheetId,
+            sheetTitle,
+            title: typeof spec.title === "string" ? spec.title : "",
+            chartType: typeof basicChart.chartType === "string" ? basicChart.chartType : null,
+            seriesCount: series.length,
+            anchorRow: typeof anchor.rowIndex === "number" ? anchor.rowIndex : null,
+            anchorCol: typeof anchor.columnIndex === "number" ? anchor.columnIndex : null,
+          });
+        }
+
+        const pivots = Array.isArray(grid.pivotTables) ? (grid.pivotTables as JsonMap[]) : [];
+        for (const _pivot of pivots) {
+          objects.push({ kind: "pivot_table", sheetId, sheetTitle });
+        }
+      }
+
+      const lines = objects.map((obj) => {
+        if (obj.kind === "chart") {
+          return [
+            `- chart \`${obj.title || "(untitled)\"}`,
+            `  - objectId: ${obj.objectId}`,
+            `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
+            `  - type: ${obj.chartType ?? "?"}`,
+            `  - series: ${obj.seriesCount}`,
+            obj.anchorRow !== null ? `  - anchor: row ${obj.anchorRow}, col ${obj.anchorCol}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }
+        return `- ${String(obj.kind)} on ${obj.sheetTitle} (sheetId ${obj.sheetId})`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Objects (${objects.length}):\n${lines.length > 0 ? lines.join("\n") : "No embedded objects found."}`,
+          },
+        ],
+        details: { spreadsheetId: params.spreadsheetId, count: objects.length, objects },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "google_docs_read",
     label: "Google Docs Read",
     description: "Read text content from a Google Docs document.",
