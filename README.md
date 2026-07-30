@@ -149,6 +149,46 @@ The package gallery reads npm packages that include the `pi-package` keyword.
 - Reload in pi: `/reload`
 - Re-run setup after scope changes: `/gws-setup`
 
+## Testing
+
+Full TDD test suite via [vitest](https://vitest.dev/). Three layers:
+
+1. **Pure helpers** (`src/pure.ts`) — pure fns, no mocks. Markdown rendering, JSON parse, path normalize, OAuth URL, doc/slide/sheet extraction.
+2. **IO layer** (`index.ts`) — config read/write, token refresh, `googleRequest`/`googleBinaryRequest`/`googleDriveMultipartUpload`, `exchangeCodeForToken`. Mocked via `src/platform.ts` seam + `globalThis.fetch` spies.
+3. **Factory + tools** (`index.ts`) — fake `ExtensionAPI` records registrations; each tool handler exercised with mocked fetch + fs.
+
+### Layout
+
+```
+index.ts          # extension entrypoint (IO + factory)
+src/pure.ts       # pure helpers (exported, tested directly)
+src/platform.ts   # platform seam: fs/homedir/config-path (mockable)
+test/*.test.ts    # vitest specs
+vitest.config.ts  # vitest + v8 coverage config
+tsconfig.json     # project type-check
+```
+
+### Commands
+
+```bash
+npm test            # vitest run
+npm run test:watch  # watch mode
+npm run test:coverage  # run + v8 coverage report
+npm run typecheck   # tsc --noEmit
+npm run check       # type-check + tests (same as pre-commit hook)
+```
+
+### Architecture (TDD)
+
+- Pure helpers split to `src/pure.ts` so unit tests need no mocks — fastest, highest-value coverage.
+- IO fns use `src/platform.ts` seam (`fs`, `getConfigPath()`) instead of hardcoding `homedir()` at module load. Tests `vi.mock("../src/platform.js")`.
+- Default-exported factory registered tools/commands captured by fake `pi`, then handlers called directly.
+- Coverage thresholds enforced in `vitest.config.ts`: stmts 55%, branches 45%, funcs 55%, lines 55%.
+
+### Coverage
+
+Current: ~82% statements, ~69% branches, ~90% functions, ~84% lines. Uncovered = mostly UI-prompt branches in `gws-setup`/`gws-logout` commands (interactive, hard to test) + `waitForAuthCode` HTTP server paths.
+
 ## Security Notes
 
 - Do not commit OAuth tokens (`oauth.json`).
