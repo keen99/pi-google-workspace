@@ -1900,6 +1900,16 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    ctx.ui.setStatus(EXTENSION_NAME, "Use /gws-setup to connect Google Workspace");
+    const config = await readConfig().catch(() => null);
+    if (!config) {
+      ctx.ui.setStatus(EXTENSION_NAME, "Use /gws-setup to connect Google Workspace");
+    } else {
+      const expired = config.tokens.expiry_date ? Date.now() > config.tokens.expiry_date : false;
+      const haveRefresh = !!config.tokens.refresh_token;
+      ctx.ui.setStatus(
+        EXTENSION_NAME,
+        `Google Workspace connected${haveRefresh ? (expired ? " (token refreshing)" : "") : " (no refresh token — re-run /gws-setup)"}`,
+      );
+    }
   });
 }
