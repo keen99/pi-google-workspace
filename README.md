@@ -183,11 +183,13 @@ npm run check       # type-check + tests (same as pre-commit hook)
 - Pure helpers split to `src/pure.ts` so unit tests need no mocks — fastest, highest-value coverage.
 - IO fns use `src/platform.ts` seam (`fs`, `getConfigPath()`) instead of hardcoding `homedir()` at module load. Tests `vi.mock("../src/platform.js")`.
 - Default-exported factory registered tools/commands captured by fake `pi`, then handlers called directly.
-- Coverage thresholds enforced in `vitest.config.ts`: stmts 55%, branches 45%, funcs 55%, lines 55%.
+- Coverage thresholds enforced per source file in `vitest.config.ts`: statements 75%, branches 60%, functions 80%, lines 75%.
 
 ### Coverage
 
 Current: ~82% statements, ~69% branches, ~90% functions, ~84% lines. Uncovered = mostly UI-prompt branches in `gws-setup`/`gws-logout` commands (interactive, hard to test) + `waitForAuthCode` HTTP server paths.
+
+Coverage output includes every `src/**/*.ts` file and `index.ts`. Console report shows full uncovered line ranges. Detailed HTML report lives at `coverage/index.html`; machine-readable summary lives at `coverage/coverage-summary.json`. Coverage reports are also generated when tests fail.
 
 ## Security Notes
 
