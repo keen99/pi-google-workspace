@@ -1601,9 +1601,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
       });
 
       return {
-        content: [{ type: "text", text: `Cells (${flat.length}):
-${lines.length > 0 ? lines.join("
-") : "No cells in range."}` }],
+        content: [{ type: "text", text: `Cells (${flat.length}):\n${lines.length > 0 ? lines.join("\n") : "No cells in range."}` }],
         details: { spreadsheetId: params.spreadsheetId, range: params.range, cellCount: flat.length, cells },
       };
     },
