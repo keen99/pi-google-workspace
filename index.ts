@@ -1498,6 +1498,118 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "google_sheets_read_format",
+    label: "Google Sheets Read Format",
+    description: [
+      "Read cell formatting (text color, background, font, bold/italic, alignment, number format, borders) for a range.",
+      "Returns userEnteredFormat per cell. Uses spreadsheets.get with cell fields (NOT values.get).",
+      "",
+      "Output: 2D array of cells. Each cell has:",
+      "- formattedValue (display string)",
+      "- textFormat: { foregroundColor: {red,green,blue}, bold, italic, fontSize, fontFamily, strikethrough, underline }",
+      "- backgroundColor: { red, green, blue } (cell fill)",
+      "- horizontalAlignment, verticalAlignment", "- numberFormat: { type, pattern }",
+      "- padding", "- borders: { top, bottom, left, right } each { style, width, color }", "- wrapStrategy", "- textRotation", "- hyperlink (if present)",
+      "", "Colors are 0..1 floats. Null fields = unset (inherit/default).", "",
+      "For just cell values without formatting, use google_sheets_read instead.",
+    ].join("\n"),
+    promptSnippet: "Read cell formatting (text color, fill, font, borders) for a range.",
+    parameters: Type.Object({
+      spreadsheetId: Type.String({ description: "Spreadsheet ID" }),
+      range: Type.String({ description: "A1 range including sheet name (e.g. Sheet1!A1:D20)" }),
+      includeValues: Type.Optional(Type.Boolean({ description: "Include formattedValue per cell. Default true." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const includeValues = params.includeValues ?? true;
+      const valueField = includeValues ? "formattedValue," : "";
+      const fields = `sheets(data(rowData(values(${valueField}userEnteredFormat,textFormatRuns,hyperlink,userEnteredValue))))`;
+
+      const data = await googleRequest(`/v4/spreadsheets/${encodeURIComponent(params.spreadsheetId)}`, {
+        query: { ranges: params.range, fields },
+        signal,
+      });
+
+      const sheets = Array.isArray(data.sheets) ? (data.sheets as JsonMap[]) : [];
+      const gridDataArray = sheets.length > 0 ? ((sheets[0] as JsonMap).data as JsonMap[] | undefined) ?? [] : [];
+      const gridData = gridDataArray[0] ?? {};
+      const rowData = Array.isArray(gridData.rowData) ? (gridData.rowData as JsonMap[]) : [];
+      const startRow = typeof gridData.startRow === "number" ? gridData.startRow : 0;
+      const startCol = typeof gridData.startColumn === "number" ? gridData.startColumn : 0;
+
+      const cells: JsonMap[][] = [];
+      rowData.forEach((row, rowOffset) => {
+        const values = Array.isArray(row.values) ? (row.values as JsonMap[]) : [];
+        const rowCells: JsonMap[] = [];
+        values.forEach((cell, colOffset) => {
+          const fmt = (cell.userEnteredFormat as JsonMap | undefined) ?? {};
+          const textFmt = (fmt.textFormat as JsonMap | undefined) ?? {};
+          const fg = textFmt.foregroundColor as JsonMap | undefined;
+          const bg = fmt.backgroundColor as JsonMap | undefined;
+          const nf = fmt.numberFormat as JsonMap | undefined;
+          const borders = fmt.borders as JsonMap | undefined;
+
+          const colorStr = (c: JsonMap | undefined) => {
+            if (!c) return null;
+            const toByte = (v: unknown) => (typeof v === "number" ? Math.round(v * 255) : null);
+            const r = toByte(c.red);
+            const g = toByte(c.green);
+            const b = toByte(c.blue);
+            if (r === null && g === null && b === null) return null;
+            const hex = (n: number | null) => (n === null ? "??" : n.toString(16).padStart(2, "0"));
+            return `#${hex(r)}${hex(g)}${hex(b)}`;
+          };
+
+          rowCells.push({
+            row: startRow + rowOffset,
+            col: startCol + colOffset,
+            formattedValue: includeValues ? (typeof cell.formattedValue === "string" ? cell.formattedValue : (cell.userEnteredValue as JsonMap | undefined)) : undefined,
+            textColor: colorStr(fg),
+            textBold: textFmt.bold === true,
+            textItalic: textFmt.italic === true,
+            fontSize: typeof textFmt.fontSize === "number" ? textFmt.fontSize : null,
+            fontFamily: typeof textFmt.fontFamily === "string" ? textFmt.fontFamily : null,
+            underline: textFmt.underline === true,
+            strikethrough: textFmt.strikethrough === true,
+            backgroundColor: colorStr(bg),
+            horizontalAlign: typeof fmt.horizontalAlignment === "string" ? fmt.horizontalAlignment : null,
+            verticalAlign: typeof fmt.verticalAlignment === "string" ? fmt.verticalAlignment : null,
+            wrapStrategy: typeof fmt.wrapStrategy === "string" ? fmt.wrapStrategy : null,
+            numberFormatType: typeof nf?.type === "string" ? nf.type : null,
+            numberFormatPattern: typeof nf?.pattern === "string" ? nf.pattern : null,
+            hyperlink: typeof cell.hyperlink === "string" ? cell.hyperlink : null,
+            hasBorders: !!borders,
+          });
+        });
+        cells.push(rowCells);
+      });
+
+      const flat = cells.flat();
+      const lines = flat.map((c) => {
+        const parts: string[] = [];
+        if (c.formattedValue !== undefined) {
+          const v = typeof c.formattedValue === "string" ? c.formattedValue : JSON.stringify(c.formattedValue ?? "");
+          parts.push(`value="${v.slice(0, 40)}"`);
+        }
+        if (c.textColor) parts.push(`color=${c.textColor}`);
+        if (c.textBold) parts.push("bold");
+        if (c.textItalic) parts.push("italic");
+        if (c.backgroundColor) parts.push(`bg=${c.backgroundColor}`);
+        if (c.horizontalAlign) parts.push(`align=${c.horizontalAlign}`);
+        if (c.numberFormatType) parts.push(`numfmt=${c.numberFormatType}${c.numberFormatPattern ? `(${c.numberFormatPattern})` : ""}`);
+        if (c.hyperlink) parts.push(`link=${c.hyperlink.slice(0, 30)}`);
+        return `R${c.row + 1}C${c.col + 1}: ${parts.join(" ") || "(no format)"}`;
+      });
+
+      return {
+        content: [{ type: "text", text: `Cells (${flat.length}):
+${lines.length > 0 ? lines.join("
+") : "No cells in range."}` }],
+        details: { spreadsheetId: params.spreadsheetId, range: params.range, cellCount: flat.length, cells },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "google_docs_read",
     label: "Google Docs Read",
     description: "Read text content from a Google Docs document.",

@@ -1,6 +1,6 @@
 {
   "name": "pi-google-workspace",
-  "version": "1.4.0-keen99",
+  "version": "1.5.0-keen99",
   "description": "Google Workspace extension for pi (Drive, Docs, Sheets, Slides with OAuth)",
   "license": "MIT",
   "repository": {

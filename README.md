@@ -132,6 +132,7 @@ If `refresh_token` is missing (or scopes changed), run `/gws-setup` again and re
 - `google_sheets_batch_update` (keen99 fork — formats, validations, merges, sheet ops, find/replace, charts, protected ranges, named ranges, conditional formatting)
 - `google_sheets_add_chart` (keen99 fork — column/bar/line/area/pie/scatter chart from data range)
 - `google_sheets_list_objects` (keen99 fork — list charts/images/pivot tables; returns objectIds for deletion)
+- `google_sheets_read_format` (keen99 fork — read cell formatting: text color, fill, font, bold, borders, number format)
 
 ### Slides
 - `google_slides_read`
