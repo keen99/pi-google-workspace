@@ -1584,11 +1584,24 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
       });
 
       const flat = cells.flat();
-      const lines = flat.map((c) => {
+      const lines = flat.map((cell) => {
+        const c = cell as {
+          row: number;
+          col: number;
+          formattedValue?: unknown;
+          textColor?: string | null;
+          textBold?: boolean;
+          textItalic?: boolean;
+          backgroundColor?: string | null;
+          horizontalAlign?: string | null;
+          numberFormatType?: string | null;
+          numberFormatPattern?: string | null;
+          hyperlink?: string | null;
+        };
         const parts: string[] = [];
         if (c.formattedValue !== undefined) {
           const v = typeof c.formattedValue === "string" ? c.formattedValue : JSON.stringify(c.formattedValue ?? "");
-          parts.push(`value="${v.slice(0, 40)}"`);
+          parts.push(`value="${String(v).slice(0, 40)}"`);
         }
         if (c.textColor) parts.push(`color=${c.textColor}`);
         if (c.textBold) parts.push("bold");
@@ -1596,7 +1609,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         if (c.backgroundColor) parts.push(`bg=${c.backgroundColor}`);
         if (c.horizontalAlign) parts.push(`align=${c.horizontalAlign}`);
         if (c.numberFormatType) parts.push(`numfmt=${c.numberFormatType}${c.numberFormatPattern ? `(${c.numberFormatPattern})` : ""}`);
-        if (c.hyperlink) parts.push(`link=${c.hyperlink.slice(0, 30)}`);
+        if (typeof c.hyperlink === "string") parts.push(`link=${c.hyperlink.slice(0, 30)}`);
         return `R${c.row + 1}C${c.col + 1}: ${parts.join(" ") || "(no format)"}`;
       });
 
