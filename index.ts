@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
@@ -252,7 +252,12 @@ export async function googleDriveMultipartUpload(
   return data;
 }
 
-async function waitForAuthCode(redirectUri: string, expectedState: string, timeoutMs = 180_000): Promise<string> {
+export async function waitForAuthCode(
+  redirectUri: string,
+  expectedState: string,
+  timeoutMs = 180_000,
+  onListening?: (port: number) => void,
+): Promise<string> {
   const callback = new URL(redirectUri);
   const host = callback.hostname;
   const port = Number(callback.port || (callback.protocol === "https:" ? 443 : 80));
@@ -309,7 +314,10 @@ async function waitForAuthCode(redirectUri: string, expectedState: string, timeo
       }
     });
 
-    server.listen(port, host, () => undefined);
+    server.listen(port, host, () => {
+      const address = server.address();
+      if (typeof address === "object" && address) onListening?.(address.port);
+    });
     server.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -356,7 +364,7 @@ export async function exchangeCodeForToken(params: {
   } satisfies OAuthTokens;
 }
 
-async function openBrowser(pi: ExtensionAPI, url: string) {
+export async function openBrowser(pi: ExtensionAPI, url: string) {
   const platform = process.platform;
 
   if (platform === "darwin") {
@@ -372,7 +380,12 @@ async function openBrowser(pi: ExtensionAPI, url: string) {
   await pi.exec("xdg-open", [url]);
 }
 
-export default function googleWorkspaceExtension(pi: ExtensionAPI) {
+export type ExtensionDependencies = {
+  openBrowser?: typeof openBrowser;
+  waitForAuthCode?: typeof waitForAuthCode;
+};
+
+export default function googleWorkspaceExtension(pi: ExtensionAPI, dependencies: ExtensionDependencies = {}) {
   pi.registerCommand("gws-setup", {
     description: "Configure Google Workspace OAuth (personal account)",
     handler: async (_args, ctx) => {
@@ -402,8 +415,13 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         return;
       }
 
-      if (!["http:", "https:"].includes(parsedRedirect.protocol)) {
-        ctx.ui.notify("Redirect URI must use http or https.", "error");
+      if (parsedRedirect.protocol !== "http:") {
+        ctx.ui.notify("Redirect URI must use http.", "error");
+        return;
+      }
+
+      if (!["127.0.0.1", "localhost", "::1"].includes(parsedRedirect.hostname)) {
+        ctx.ui.notify("Redirect URI must use a loopback host (127.0.0.1, localhost, or ::1).", "error");
         return;
       }
 
@@ -412,7 +430,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
 
       ctx.ui.notify("Opening your browser to start Google authentication...", "info");
       try {
-        await openBrowser(pi, url);
+        await (dependencies.openBrowser ?? openBrowser)(pi, url);
       } catch {
         ctx.ui.notify("Failed to open browser automatically. Open this URL manually:", "warning");
         ctx.ui.notify(url, "info");
@@ -420,7 +438,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
 
       let code = "";
       try {
-        code = await waitForAuthCode(redirectUri, state);
+        code = await (dependencies.waitForAuthCode ?? waitForAuthCode)(redirectUri, state);
       } catch (error) {
         ctx.ui.notify(`Automatic callback failed: ${(error as Error).message}`, "warning");
         const manualCode = await ctx.ui.input("Paste the authorization code", "4/0A...");
@@ -1173,21 +1191,16 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         }
       }
 
-      const lines = objects.map((obj) => {
-        if (obj.kind === "chart") {
-          return [
-            `- chart \`${obj.title || "(untitled)"}\``,
-            `  - objectId: ${obj.objectId}`,
-            `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
-            `  - type: ${obj.chartType ?? "?"}`,
-            `  - series: ${obj.seriesCount}`,
-            obj.anchorRow !== null ? `  - anchor: row ${obj.anchorRow}, col ${obj.anchorCol}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n");
-        }
-        return `- ${String(obj.kind)} on ${obj.sheetTitle} (sheetId ${obj.sheetId})`;
-      });
+      const lines = objects.map((obj) => [
+        `- chart \`${obj.title || "(untitled)"}\``,
+        `  - objectId: ${obj.objectId}`,
+        `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
+        `  - type: ${obj.chartType ?? "?"}`,
+        `  - series: ${obj.seriesCount}`,
+        obj.anchorRow !== null ? `  - anchor: row ${obj.anchorRow}, col ${obj.anchorCol}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"));
 
       return {
         content: [

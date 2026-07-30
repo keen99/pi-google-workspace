@@ -38,7 +38,8 @@ export const DOC_EXPORT_MAP: Record<Exclude<DocExportFormat, "md">, { mime: stri
 
 export function parseJson(text: string): JsonMap {
   try {
-    return JSON.parse(text) as JsonMap;
+    const value: unknown = JSON.parse(text);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonMap : {};
   } catch {
     return {};
   }

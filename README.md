@@ -164,7 +164,7 @@ index.ts          # extension entrypoint (IO + factory)
 src/pure.ts       # pure helpers (exported, tested directly)
 src/platform.ts   # platform seam: fs/homedir/config-path (mockable)
 test/*.test.ts    # vitest specs
-vitest.config.ts  # vitest + v8 coverage config
+vitest.config.mts  # vitest + v8 coverage config
 tsconfig.json     # project type-check
 ```
 
@@ -183,11 +183,11 @@ npm run check       # type-check + tests (same as pre-commit hook)
 - Pure helpers split to `src/pure.ts` so unit tests need no mocks — fastest, highest-value coverage.
 - IO fns use `src/platform.ts` seam (`fs`, `getConfigPath()`) instead of hardcoding `homedir()` at module load. Tests `vi.mock("../src/platform.js")`.
 - Default-exported factory registered tools/commands captured by fake `pi`, then handlers called directly.
-- Coverage thresholds enforced per source file in `vitest.config.ts`: statements 75%, branches 60%, functions 80%, lines 75%.
+- Coverage thresholds enforced per source file in `vitest.config.mts`: statements 90%, branches 80%, functions 95%, lines 90%.
 
 ### Coverage
 
-Current: ~82% statements, ~69% branches, ~90% functions, ~84% lines. Uncovered = mostly UI-prompt branches in `gws-setup`/`gws-logout` commands (interactive, hard to test) + `waitForAuthCode` HTTP server paths.
+Current: ~98% statements, ~84% branches, 100% functions, 100% lines. OAuth callback, setup/logout commands, browser launch selection, token refresh/retry paths, platform functions, pure helpers, and all 20 tool handlers are exercised.
 
 Coverage output includes every `src/**/*.ts` file and `index.ts`. Console report shows full uncovered line ranges. Detailed HTML report lives at `coverage/index.html`; machine-readable summary lives at `coverage/coverage-summary.json`. Coverage reports are also generated when tests fail.
 

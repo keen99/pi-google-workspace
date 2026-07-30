@@ -58,7 +58,7 @@ function fetchOk(body: unknown, headers: Record<string, string> = { "content-typ
       const s = typeof body === "string" ? body : JSON.stringify(body);
       return new TextEncoder().encode(s).buffer;
     },
-    headers: new Map(Object.entries(headers)),
+    headers: new Headers(headers),
   } as unknown as Response;
 }
 
@@ -159,6 +159,19 @@ describe("google_sheets_batch_update", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(fetchOk({ replies: [{ findReplace: { valuesChanged: 3 } }] })));
     const out = (await runTool("google_sheets_batch_update", { spreadsheetId: "S", requests: [{}] })) as { content: { text: string }[] };
     expect(out.content[0].text).toContain("3 value(s) changed");
+  });
+  it("sends optional response controls as query parameters", async () => {
+    const f = vi.fn().mockResolvedValue(fetchOk({ replies: [] }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+    await runTool("google_sheets_batch_update", {
+      spreadsheetId: "S",
+      requests: [],
+      responseIncludeGridData: true,
+      responseRanges: ["Sheet1!A1:B2", "Other!C3"],
+    });
+    const url = f.mock.calls[0][0] as URL;
+    expect(url.searchParams.get("responseIncludeGridData")).toBe("true");
+    expect(url.searchParams.get("ranges")).toBe("Sheet1!A1:B2,Other!C3");
   });
 });
 
@@ -324,13 +337,21 @@ describe("google_slides_replace_text", () => {
 });
 
 describe("google_drive_upload", () => {
-  it("reads local file + multipart uploads", async () => {
-    fsMocks.readFile.mockResolvedValue(JSON.stringify(config));
+  it("reads exact local file bytes + multipart uploads", async () => {
+    fsMocks.readFile.mockReset()
+      .mockResolvedValueOnce(Buffer.from("FILE-CONTENTS"))
+      .mockResolvedValueOnce(JSON.stringify(config));
     const f = vi.fn().mockResolvedValue(fetchOk({ id: "UP", webViewLink: "u" }));
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
-    const out = (await runTool("google_drive_upload", { localPath: "f.txt" })) as { details: { fileId: string } };
+    const out = (await runTool("google_drive_upload", { localPath: "f.txt", name: "remote.txt", parentId: "P", mimeType: "text/custom" })) as { details: { fileId: string } };
     expect(out.details.fileId).toBe("UP");
+    expect(fsMocks.readFile).toHaveBeenNthCalledWith(1, "/tmp/test-cwd/f.txt");
     expect(f.mock.calls[0][1].method).toBe("POST");
+    const body = f.mock.calls[0][1].body as Buffer;
+    expect(body.toString()).toContain("FILE-CONTENTS");
+    expect(body.toString()).toContain('"name":"remote.txt"');
+    expect(body.toString()).toContain('"parents":["P"]');
+    expect(body.toString()).toContain("Content-Type: text/custom");
   });
 });
 
@@ -341,7 +362,7 @@ describe("google_drive_download binary", () => {
       .mockResolvedValueOnce({
         ok: true, status: 200, text: async () => "",
         arrayBuffer: async () => new TextEncoder().encode("data").buffer,
-        headers: new Map([["content-type", "text/plain"]]),
+        headers: new Headers({ "content-type": "text/plain" }),
       });
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
     const out = (await runTool("google_drive_download", { fileId: "1" })) as { details: { bytesWritten: number } };

@@ -74,7 +74,10 @@ describe("saveConfig", () => {
 });
 
 describe("getValidConfig", () => {
-  beforeEach(() => fsMocks.readFile.mockReset());
+  beforeEach(() => {
+    fsMocks.readFile.mockReset();
+    fsMocks.writeFile.mockClear();
+  });
   it("throws when no config", async () => {
     fsMocks.readFile.mockRejectedValueOnce(new Error("ENOENT"));
     await expect(getValidConfig()).rejects.toThrow(/credentials not found/);
@@ -82,5 +85,24 @@ describe("getValidConfig", () => {
   it("returns config when token valid", async () => {
     fsMocks.readFile.mockResolvedValueOnce(JSON.stringify(sampleConfig));
     expect(await getValidConfig()).toEqual(sampleConfig);
+  });
+
+  it("refreshes and saves an expired token", async () => {
+    const expired = {
+      ...sampleConfig,
+      tokens: { ...sampleConfig.tokens, expiry_date: Date.now() - 1 },
+    };
+    fsMocks.readFile.mockResolvedValueOnce(JSON.stringify(expired));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ access_token: "NEW", expires_in: 3600 }),
+    } as Response);
+
+    const result = await getValidConfig();
+
+    expect(result.tokens.access_token).toBe("NEW");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fsMocks.writeFile).toHaveBeenCalledOnce();
   });
 });

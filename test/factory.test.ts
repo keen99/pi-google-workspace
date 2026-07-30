@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const fsMocks = vi.hoisted(() => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -181,7 +181,7 @@ describe("tool: google_drive_download rejects native files", () => {
       ok: true,
       status: 200,
       text: async () => JSON.stringify({ id: "1", name: "Doc", mimeType: "application/vnd.google-apps.document" }),
-      headers: new Map(),
+      headers: new Headers(),
     } as unknown as Response);
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
     await expect((dl.execute as (...a: unknown[]) => Promise<unknown>)("t1", { fileId: "1" })).rejects.toThrow(/Google-native file type/);

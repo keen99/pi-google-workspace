@@ -6,7 +6,8 @@ cd "$DIR"
 
 # Ensure dev deps present in worktree.
 if [ ! -x "$DIR/node_modules/.bin/tsc" ] || [ ! -x "$DIR/node_modules/.bin/vitest" ]; then
-  NPM_WRAPPER_ALLOW_LOCAL=1 npm install >/dev/null 2>&1 || true
+  echo ">> install missing dev dependencies"
+  NPM_WRAPPER_ALLOW_LOCAL=1 npm install
 fi
 
 echo ">> type-check (tsc --noEmit)"

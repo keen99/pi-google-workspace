@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseJson,
   isExpired,
@@ -20,11 +20,13 @@ describe("parseJson", () => {
   it("returns empty object on empty string", () => {
     expect(parseJson("")).toEqual({});
   });
-  it("parses array into object? no, JSON.parse array returned as-is", () => {
-    // array is valid json; parseJson casts to JsonMap but value is array
-    const out = parseJson("[1,2,3]");
-    // cast happens at type level; runtime is array
-    expect(Array.isArray(out)).toBe(true);
+  it("rejects arrays because callers require an object", () => {
+    expect(parseJson("[1,2,3]")).toEqual({});
+  });
+  it("rejects primitive JSON values", () => {
+    expect(parseJson("null")).toEqual({});
+    expect(parseJson("42")).toEqual({});
+    expect(parseJson('"text"')).toEqual({});
   });
 });
 
@@ -42,9 +44,9 @@ describe("isExpired", () => {
     expect(isExpired({ access_token: "x", expiry_date: Date.now() + 30_000 })).toBe(true);
   });
   it("returns true at exactly buffer boundary", () => {
-    const expiry = Date.now() + 60_000;
-    // now >= expiry - 60000 -> now >= now -> true
-    expect(isExpired({ access_token: "x", expiry_date: expiry })).toBe(true);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    expect(isExpired({ access_token: "x", expiry_date: 1_060_000 })).toBe(true);
+    clock.mockRestore();
   });
 });
 

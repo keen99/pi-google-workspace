@@ -25,13 +25,17 @@
   ],
   "files": [
     "index.ts",
+    "src/**/*.ts",
     "README.md",
     "google-workspace.md",
     "LICENSE"
   ],
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@sinclair/typebox": "*"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   },
   "pi": {
     "extensions": [

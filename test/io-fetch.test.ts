@@ -42,7 +42,7 @@ function mockFetchResponse(status: number, body: unknown, headers: Record<string
       const s = typeof body === "string" ? body : JSON.stringify(body);
       return new TextEncoder().encode(s).buffer;
     },
-    headers: new Map(Object.entries(headers)),
+    headers: new Headers(headers),
   });
 }
 
@@ -96,6 +96,15 @@ describe("refreshToken", () => {
     expect(call[1].headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(String(call[1].body)).toContain("grant_type=refresh_token");
     expect(String(call[1].body)).toContain("refresh_token=REFRESH");
+  });
+
+  it("keeps previous token type and scope when refresh response omits them", async () => {
+    const f = mockFetchResponse(200, { access_token: "NEW" });
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+    const out = await refreshToken(validConfig);
+    expect(out.tokens.token_type).toBe("Bearer");
+    expect(out.tokens.scope).toBe("scope-a scope-b");
+    expect(out.tokens.expiry_date).toBeGreaterThan(Date.now() + 3_500_000);
   });
 });
 
@@ -177,9 +186,9 @@ describe("googleRequest", () => {
   it("refreshes on 401 then retries", async () => {
     fsMocks.readFile.mockResolvedValue(JSON.stringify(validConfig));
     const refreshJson = JSON.stringify({ access_token: "NEW", expires_in: 3600 });
-    const err401 = { ok: false, status: 401, text: async () => JSON.stringify({ error: { message: "expired" } }), headers: new Map() };
-    const ok200 = { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }), headers: new Map() };
-    const refreshOk = { ok: true, status: 200, text: async () => refreshJson, headers: new Map() };
+    const err401 = { ok: false, status: 401, text: async () => JSON.stringify({ error: { message: "expired" } }), headers: new Headers() };
+    const ok200 = { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }), headers: new Headers() };
+    const refreshOk = { ok: true, status: 200, text: async () => refreshJson, headers: new Headers() };
     const f = vi.fn();
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
     // call order: first request 401 -> refresh POST 200 -> retry request 200
@@ -243,6 +252,15 @@ describe("googleBinaryRequest", () => {
     await expect(googleBinaryRequest("/drive/v3/files/x")).rejects.toThrow("not found");
   });
 
+  it("does not refresh 401 without refresh token and uses generic error", async () => {
+    const noRefresh = { ...validConfig, tokens: { ...validConfig.tokens, refresh_token: undefined } };
+    fsMocks.readFile.mockResolvedValueOnce(JSON.stringify(noRefresh));
+    const f = mockFetchResponse(401, {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+    await expect(googleBinaryRequest("/drive/v3/files/x")).rejects.toThrow("Google API error (401)");
+    expect(f).toHaveBeenCalledOnce();
+  });
+
   it("defaults content-type to octet-stream when missing", async () => {
     seedConfig();
     const f = vi.fn().mockResolvedValue({
@@ -255,6 +273,27 @@ describe("googleBinaryRequest", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
     const out = await googleBinaryRequest("/drive/v3/files/1");
     expect(out.contentType).toBe("application/octet-stream");
+  });
+
+  it("refreshes on 401 then retries with new token", async () => {
+    fsMocks.readFile.mockResolvedValue(JSON.stringify(validConfig));
+    const f = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => "{}", headers: new Headers() })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ access_token: "NEW", expires_in: 3600 }), headers: new Headers() })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => "",
+        arrayBuffer: async () => new TextEncoder().encode("retried").buffer,
+        headers: new Headers({ "content-type": "text/plain" }),
+      });
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+
+    const out = await googleBinaryRequest("/drive/v3/files/1");
+
+    expect(new TextDecoder().decode(out.bytes)).toBe("retried");
+    expect(f).toHaveBeenCalledTimes(3);
+    expect(f.mock.calls[2][1].headers.Authorization).toBe("Bearer NEW");
   });
 });
 
@@ -281,5 +320,27 @@ describe("googleDriveMultipartUpload", () => {
     const f = mockFetchResponse(500, { error: { message: "upload failed" } });
     vi.spyOn(globalThis, "fetch").mockImplementation(f);
     await expect(googleDriveMultipartUpload({ name: "x" }, new Uint8Array(), "text/plain")).rejects.toThrow("upload failed");
+  });
+
+  it("uses generic error when upload response has no message", async () => {
+    seedConfig();
+    const f = mockFetchResponse(500, {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+    await expect(googleDriveMultipartUpload({ name: "x" }, new Uint8Array(), "text/plain")).rejects.toThrow("Google API error (500)");
+  });
+
+  it("refreshes on 401 then retries with new token", async () => {
+    fsMocks.readFile.mockResolvedValue(JSON.stringify(validConfig));
+    const f = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => "{}", headers: new Headers() })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ access_token: "NEW", expires_in: 3600 }), headers: new Headers() })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ id: "RETRIED" }), headers: new Headers() });
+    vi.spyOn(globalThis, "fetch").mockImplementation(f);
+
+    const out = await googleDriveMultipartUpload({ name: "x" }, new TextEncoder().encode("data"), "text/plain");
+
+    expect(out.id).toBe("RETRIED");
+    expect(f).toHaveBeenCalledTimes(3);
+    expect(f.mock.calls[2][1].headers.Authorization).toBe("Bearer NEW");
   });
 });

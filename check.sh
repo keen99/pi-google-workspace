@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ ! -x ./node_modules/.bin/tsc ] || [ ! -x ./node_modules/.bin/vitest ]; then
-  NPM_WRAPPER_ALLOW_LOCAL=1 npm install >/dev/null 2>&1 || true
+  echo ">> install missing dev dependencies"
+  NPM_WRAPPER_ALLOW_LOCAL=1 npm install
 fi
 
 echo ">> type-check (tsc --noEmit)"

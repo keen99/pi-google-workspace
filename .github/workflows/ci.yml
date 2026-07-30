@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        node: [22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +20,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - name: Install
-        run: NPM_WRAPPER_ALLOW_LOCAL=1 npm install
+        run: NPM_WRAPPER_ALLOW_LOCAL=1 npm ci
       - name: Type-check
         run: npm run typecheck
       - name: Tests + coverage
