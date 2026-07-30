@@ -749,7 +749,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         };
 
         await saveConfig(config);
-        ctx.ui.notify(`Configuration saved: ${CONFIG_PATH}`, "success");
+        ctx.ui.notify(`Configuration saved: ${CONFIG_PATH}`, "info");
       } catch (error) {
         ctx.ui.notify(`Configuration failed: ${(error as Error).message}`, "error");
       }
@@ -764,7 +764,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
 
       try {
         await rm(CONFIG_PATH, { force: true });
-        ctx.ui.notify("Credentials deleted.", "success");
+        ctx.ui.notify("Credentials deleted.", "info");
       } catch (error) {
         ctx.ui.notify(`Deletion failed: ${(error as Error).message}`, "error");
       }
@@ -782,7 +782,13 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
       if (!config) {
         return {
           content: [{ type: "text", text: `Not configured. Run /gws-setup. (${CONFIG_PATH})` }],
-          details: { configured: false, configPath: CONFIG_PATH },
+          details: {
+            configured: false,
+            configPath: CONFIG_PATH,
+            refreshToken: false,
+            expiresAt: null,
+            expired: null,
+          },
         };
       }
 
