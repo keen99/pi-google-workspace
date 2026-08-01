@@ -125,13 +125,13 @@ describe("extension registration", () => {
     expect(events.has("session_start")).toBe(true);
   });
 
-  it("session_start calls ui.setStatus", async () => {
+  it("session_start handler is a no-op (footer kept clean)", async () => {
     const { pi, events } = fakePi();
     googleWorkspaceExtension(pi);
     const setStatus = vi.fn();
     const ctx = { ui: { setStatus } } as unknown as Record<string, unknown>;
     await (events.get("session_start") as (...a: unknown[]) => unknown)({} as never, ctx);
-    expect(setStatus).toHaveBeenCalledOnce();
+    expect(setStatus).not.toHaveBeenCalled();
   });
 });
 
