@@ -9,3 +9,8 @@ pnpm-debug.log*
 # Local OAuth secrets
 oauth.json
 **/oauth.json
+
+# Test artifacts
+coverage/
+.nyc_output/
+*.lcov

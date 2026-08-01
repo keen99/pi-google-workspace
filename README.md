@@ -149,6 +149,48 @@ The package gallery reads npm packages that include the `pi-package` keyword.
 - Reload in pi: `/reload`
 - Re-run setup after scope changes: `/gws-setup`
 
+## Testing
+
+Full TDD test suite via [vitest](https://vitest.dev/). Three layers:
+
+1. **Pure helpers** (`src/pure.ts`) — pure fns, no mocks. Markdown rendering, JSON parse, path normalize, OAuth URL, doc/slide/sheet extraction.
+2. **IO layer** (`index.ts`) — config read/write, token refresh, `googleRequest`/`googleBinaryRequest`/`googleDriveMultipartUpload`, `exchangeCodeForToken`. Mocked via `src/platform.ts` seam + `globalThis.fetch` spies.
+3. **Factory + tools** (`index.ts`) — fake `ExtensionAPI` records registrations; each tool handler exercised with mocked fetch + fs.
+
+### Layout
+
+```
+index.ts          # extension entrypoint (IO + factory)
+src/pure.ts       # pure helpers (exported, tested directly)
+src/platform.ts   # platform seam: fs/homedir/config-path (mockable)
+test/*.test.ts    # vitest specs
+vitest.config.mts  # vitest + v8 coverage config
+tsconfig.json     # project type-check
+```
+
+### Commands
+
+```bash
+npm test            # vitest run
+npm run test:watch  # watch mode
+npm run test:coverage  # run + v8 coverage report
+npm run typecheck   # tsc --noEmit
+npm run check       # type-check + tests (same as pre-commit hook)
+```
+
+### Architecture (TDD)
+
+- Pure helpers split to `src/pure.ts` so unit tests need no mocks — fastest, highest-value coverage.
+- IO fns use `src/platform.ts` seam (`fs`, `getConfigPath()`) instead of hardcoding `homedir()` at module load. Tests `vi.mock("../src/platform.js")`.
+- Default-exported factory registered tools/commands captured by fake `pi`, then handlers called directly.
+- Coverage thresholds enforced per source file in `vitest.config.mts`: statements 90%, branches 80%, functions 95%, lines 90%.
+
+### Coverage
+
+Current: ~98% statements, ~84% branches, 100% functions, 100% lines. OAuth callback, setup/logout commands, browser launch selection, token refresh/retry paths, platform functions, pure helpers, and all 20 tool handlers are exercised.
+
+Coverage output includes every `src/**/*.ts` file and `index.ts`. Console report shows full uncovered line ranges. Detailed HTML report lives at `coverage/index.html`; machine-readable summary lives at `coverage/coverage-summary.json`. Coverage reports are also generated when tests fail.
+
 ## Security Notes
 
 - Do not commit OAuth tokens (`oauth.json`).

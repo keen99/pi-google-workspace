@@ -1,56 +1,43 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
+import { rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import {
+  EXTENSION_NAME,
+  DEFAULT_REDIRECT_URI,
+  OAUTH_SCOPE,
+  getConfigDir,
+  getConfigPath,
+  fs as platformFs,
+} from "./src/platform.js";
+import {
+  DOC_EXPORT_MAP,
+  authUrl,
+  extractDocText,
+  extractSlidesText,
+  getDocEndIndex,
+  getDocInsertIndex,
+  isExpired,
+  normalizeOutputPath,
+  parseJson,
+  resolveGoogleApiUrl,
+  safeFilename,
+  sheetValuesToText,
+  toMarkdownFromDocument,
+} from "./src/pure.js";
+import type { AuthConfig, DocExportFormat, JsonMap, OAuthTokens } from "./src/pure.js";
 
-const EXTENSION_NAME = "google-workspace";
-const CONFIG_DIR = join(homedir(), ".pi", "agent", "google-workspace");
-const CONFIG_PATH = join(CONFIG_DIR, "oauth.json");
-const DEFAULT_REDIRECT_URI = "http://127.0.0.1:53682/oauth2callback";
-const OAUTH_SCOPE = [
-  "https://www.googleapis.com/auth/drive",
-  "https://www.googleapis.com/auth/documents",
-  "https://www.googleapis.com/auth/presentations",
-  "https://www.googleapis.com/auth/spreadsheets",
-].join(" ");
-
-type OAuthTokens = {
-  access_token: string;
-  refresh_token?: string;
-  token_type?: string;
-  scope?: string;
-  expiry_date?: number;
-};
-
-type AuthConfig = {
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-  tokens: OAuthTokens;
-};
-
-type JsonMap = Record<string, unknown>;
-type DocExportFormat = "pdf" | "docx" | "txt" | "md" | "rtf" | "odt" | "html_zip";
-
-const DOC_EXPORT_MAP: Record<Exclude<DocExportFormat, "md">, { mime: string; ext: string }> = {
-  pdf: { mime: "application/pdf", ext: "pdf" },
-  docx: { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ext: "docx" },
-  txt: { mime: "text/plain", ext: "txt" },
-  rtf: { mime: "application/rtf", ext: "rtf" },
-  odt: { mime: "application/vnd.oasis.opendocument.text", ext: "odt" },
-  html_zip: { mime: "application/zip", ext: "zip" },
-};
+const CONFIG_PATH = getConfigPath();
 
 async function ensureConfigDir() {
-  await mkdir(CONFIG_DIR, { recursive: true });
+  await platformFs.mkdir(getConfigDir(), { recursive: true });
 }
 
-async function readConfig(): Promise<AuthConfig | null> {
+export async function readConfig(): Promise<AuthConfig | null> {
   try {
-    const raw = await readFile(CONFIG_PATH, "utf-8");
+    const raw = await platformFs.readFile(getConfigPath(), "utf-8");
     const parsed = JSON.parse(raw) as AuthConfig;
     if (!parsed?.clientId || !parsed?.clientSecret || !parsed?.tokens?.access_token) return null;
     return parsed;
@@ -59,25 +46,12 @@ async function readConfig(): Promise<AuthConfig | null> {
   }
 }
 
-async function saveConfig(config: AuthConfig) {
+export async function saveConfig(config: AuthConfig) {
   await ensureConfigDir();
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+  await platformFs.writeFile(getConfigPath(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
-function isExpired(tokens: OAuthTokens) {
-  if (!tokens.expiry_date) return false;
-  return Date.now() >= tokens.expiry_date - 60_000;
-}
-
-function parseJson(text: string): JsonMap {
-  try {
-    return JSON.parse(text) as JsonMap;
-  } catch {
-    return {};
-  }
-}
-
-async function refreshToken(config: AuthConfig, signal?: AbortSignal): Promise<AuthConfig> {
+export async function refreshToken(config: AuthConfig, signal?: AbortSignal): Promise<AuthConfig> {
   if (!config.tokens.refresh_token) {
     throw new Error("No refresh_token found. Run /gws-setup again.");
   }
@@ -120,24 +94,17 @@ async function refreshToken(config: AuthConfig, signal?: AbortSignal): Promise<A
   return nextConfig;
 }
 
-async function getValidConfig(signal?: AbortSignal): Promise<AuthConfig> {
+export async function getValidConfig(signal?: AbortSignal): Promise<AuthConfig> {
   const config = await readConfig();
   if (!config) {
-    throw new Error(`Google Workspace credentials not found. Run /gws-setup and try again. (${CONFIG_PATH})`);
+    throw new Error(`Google Workspace credentials not found. Run /gws-setup and try again. (${getConfigPath()})`);
   }
 
   if (isExpired(config.tokens)) return refreshToken(config, signal);
   return config;
 }
 
-function resolveGoogleApiUrl(path: string) {
-  if (path.startsWith("/v1/documents")) return new URL(`https://docs.googleapis.com${path}`);
-  if (path.startsWith("/v1/presentations")) return new URL(`https://slides.googleapis.com${path}`);
-  if (path.startsWith("/v4/spreadsheets")) return new URL(`https://sheets.googleapis.com${path}`);
-  return new URL(`https://www.googleapis.com${path}`);
-}
-
-async function googleRequest(
+export async function googleRequest(
   path: string,
   options: {
     method?: "GET" | "POST" | "PUT" | "PATCH";
@@ -188,7 +155,7 @@ async function googleRequest(
   return data;
 }
 
-async function googleBinaryRequest(
+export async function googleBinaryRequest(
   path: string,
   options: {
     query?: Record<string, string | number | boolean | undefined>;
@@ -234,7 +201,7 @@ async function googleBinaryRequest(
   };
 }
 
-async function googleDriveMultipartUpload(
+export async function googleDriveMultipartUpload(
   metadata: JsonMap,
   fileBytes: Uint8Array,
   mimeType: string,
@@ -285,276 +252,12 @@ async function googleDriveMultipartUpload(
   return data;
 }
 
-function safeFilename(input: string) {
-  return input
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120) || "document";
-}
-
-function normalizeOutputPath(cwd: string, outputPath: string | undefined, fallbackName: string) {
-  const candidate = outputPath?.trim() ? outputPath.trim() : fallbackName;
-  return resolve(cwd, candidate.replace(/^@/, ""));
-}
-
-function normalizeText(text: string) {
-  return text.replace(/\r\n/g, "\n").replace(/\u000b/g, "\n");
-}
-
-function escapeMdInline(text: string) {
-  return text.replace(/([\\`*_{}\[\]()#+\-.!|>~])/g, "\\$1");
-}
-
-function escapeMdTableCell(text: string) {
-  return text.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-}
-
-function applyInlineStyle(text: string, style: JsonMap | undefined): string {
-  if (!text) return "";
-  const trimmed = text.trim();
-  const left = text.slice(0, text.indexOf(trimmed));
-  const right = text.slice(text.indexOf(trimmed) + trimmed.length);
-  let core = escapeMdInline(trimmed || text);
-
-  if (!trimmed) return escapeMdInline(text);
-
-  const link = style?.link as JsonMap | undefined;
-  const url = typeof link?.url === "string" ? link.url : undefined;
-
-  const bold = style?.bold === true;
-  const italic = style?.italic === true;
-  const strike = style?.strikethrough === true;
-
-  if (bold) core = `**${core}**`;
-  if (italic) core = `*${core}*`;
-  if (strike) core = `~~${core}~~`;
-  if (url) core = `[${core}](${url})`;
-
-  return `${left}${core}${right}`;
-}
-
-function paragraphTextFromElements(elements: JsonMap[] | undefined): string {
-  if (!Array.isArray(elements)) return "";
-
-  const chunks: string[] = [];
-  for (const element of elements) {
-    const run = element.textRun as JsonMap | undefined;
-    const content = typeof run?.content === "string" ? run.content : "";
-    if (!content) continue;
-    const styled = applyInlineStyle(normalizeText(content), run?.textStyle as JsonMap | undefined);
-    chunks.push(styled);
-  }
-
-  return chunks.join("").replace(/\n+$/g, "").trim();
-}
-
-function isOrderedGlyph(glyphType: string | undefined) {
-  if (!glyphType) return false;
-  return ["DECIMAL", "ALPHA", "ROMAN"].some((token) => glyphType.includes(token));
-}
-
-function getHeadingPrefix(namedStyleType: string | undefined): string {
-  if (!namedStyleType) return "";
-  if (namedStyleType === "TITLE") return "#";
-  if (namedStyleType === "SUBTITLE") return "##";
-  const match = namedStyleType.match(/^HEADING_(\d)$/);
-  if (!match) return "";
-  const level = Number(match[1]);
-  if (!Number.isFinite(level) || level < 1 || level > 6) return "";
-  return "#".repeat(level);
-}
-
-function tableToMarkdown(table: JsonMap, lists: JsonMap | undefined) {
-  const rows = table.tableRows as JsonMap[] | undefined;
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-
-  const renderedRows = rows.map((row) => {
-    const cells = row.tableCells as JsonMap[] | undefined;
-    if (!Array.isArray(cells)) return [] as string[];
-
-    return cells.map((cell) => {
-      const content = cell.content as JsonMap[] | undefined;
-      if (!Array.isArray(content)) return "";
-      const chunks = content
-        .map((block) => blockToMarkdown(block, lists))
-        .join("\n")
-        .replace(/\n{2,}/g, "\n")
-        .trim();
-      return escapeMdTableCell(chunks);
-    });
-  });
-
-  if (renderedRows.length === 0) return "";
-  const colCount = Math.max(...renderedRows.map((row) => row.length), 1);
-
-  const normalizeRow = (row: string[]) => {
-    const cells = [...row];
-    while (cells.length < colCount) cells.push("");
-    return `| ${cells.join(" | ")} |`;
-  };
-
-  const header = normalizeRow(renderedRows[0]);
-  const divider = `| ${new Array(colCount).fill("---").join(" | ")} |`;
-  const body = renderedRows.slice(1).map(normalizeRow);
-  return [header, divider, ...body].join("\n");
-}
-
-function blockToMarkdown(block: JsonMap, lists: JsonMap | undefined, listState?: Map<string, number>): string {
-  const paragraph = block.paragraph as JsonMap | undefined;
-  if (paragraph) {
-    const elements = paragraph.elements as JsonMap[] | undefined;
-    const text = paragraphTextFromElements(elements);
-
-    const style = paragraph.paragraphStyle as JsonMap | undefined;
-    const namedStyleType = typeof style?.namedStyleType === "string" ? style.namedStyleType : undefined;
-    const heading = getHeadingPrefix(namedStyleType);
-    if (heading && text) return `${heading} ${text}`;
-
-    const bullet = paragraph.bullet as JsonMap | undefined;
-    if (bullet) {
-      const listId = typeof bullet.listId === "string" ? bullet.listId : "default";
-      const nestingLevel = typeof bullet.nestingLevel === "number" ? bullet.nestingLevel : 0;
-      const listInfo = (lists?.[listId] as JsonMap | undefined)?.listProperties as JsonMap | undefined;
-      const levels = listInfo?.nestingLevels as JsonMap[] | undefined;
-      const glyphType = typeof levels?.[nestingLevel]?.glyphType === "string" ? (levels[nestingLevel].glyphType as string) : undefined;
-      const ordered = isOrderedGlyph(glyphType);
-
-      const state = listState ?? new Map<string, number>();
-      const key = `${listId}:${nestingLevel}`;
-      const count = (state.get(key) ?? 0) + 1;
-      state.set(key, count);
-
-      for (const existingKey of state.keys()) {
-        if (!existingKey.startsWith(`${listId}:`)) continue;
-        const level = Number(existingKey.split(":")[1]);
-        if (Number.isFinite(level) && level > nestingLevel) state.delete(existingKey);
-      }
-
-      const indent = "  ".repeat(Math.max(0, nestingLevel));
-      const marker = ordered ? `${count}.` : "-";
-      return `${indent}${marker} ${text}`.trimEnd();
-    }
-
-    return text;
-  }
-
-  const table = block.table as JsonMap | undefined;
-  if (table) return tableToMarkdown(table, lists);
-
-  return "";
-}
-
-function toMarkdownFromDocument(document: JsonMap) {
-  const body = (document.body as JsonMap | undefined)?.content as JsonMap[] | undefined;
-  if (!Array.isArray(body) || body.length === 0) return "";
-
-  const lists = document.lists as JsonMap | undefined;
-  const listState = new Map<string, number>();
-  const chunks: string[] = [];
-
-  for (const block of body) {
-    const rendered = blockToMarkdown(block, lists, listState).trim();
-    if (!rendered) continue;
-    chunks.push(rendered);
-  }
-
-  const markdown = chunks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
-  return markdown ? `${markdown}\n` : "";
-}
-
-function sheetValuesToText(values: unknown[][]) {
-  if (!Array.isArray(values) || values.length === 0) return "(no data)";
-
-  return values
-    .map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? "")).join("\t") : ""))
-    .join("\n");
-}
-
-function getDocEndIndex(document: JsonMap): number {
-  const body = (document.body as JsonMap | undefined)?.content as JsonMap[] | undefined;
-  if (!Array.isArray(body) || body.length === 0) return 1;
-
-  const last = body[body.length - 1];
-  const endIndex = typeof last.endIndex === "number" ? last.endIndex : 1;
-  return Math.max(1, endIndex);
-}
-
-function extractDocText(document: JsonMap): string {
-  const body = (document.body as JsonMap | undefined)?.content as JsonMap[] | undefined;
-  if (!Array.isArray(body)) return "";
-
-  const chunks: string[] = [];
-
-  for (const block of body) {
-    const paragraph = block.paragraph as JsonMap | undefined;
-    const elements = paragraph?.elements as JsonMap[] | undefined;
-    if (!Array.isArray(elements)) continue;
-
-    for (const element of elements) {
-      const run = element.textRun as JsonMap | undefined;
-      const content = run?.content;
-      if (typeof content === "string") chunks.push(content);
-    }
-  }
-
-  return chunks.join("").trim();
-}
-
-function getDocInsertIndex(document: JsonMap): number {
-  const body = (document.body as JsonMap | undefined)?.content as JsonMap[] | undefined;
-  if (!Array.isArray(body) || body.length === 0) return 1;
-
-  const last = body[body.length - 1];
-  const endIndex = typeof last.endIndex === "number" ? last.endIndex : 1;
-  return Math.max(1, endIndex - 1);
-}
-
-function extractSlidesText(presentation: JsonMap) {
-  const slides = presentation.slides as JsonMap[] | undefined;
-  if (!Array.isArray(slides)) return [] as Array<{ slideId: string; index: number; text: string }>;
-
-  return slides.map((slide, index) => {
-    const pageElements = slide.pageElements as JsonMap[] | undefined;
-    const chunks: string[] = [];
-
-    if (Array.isArray(pageElements)) {
-      for (const pageElement of pageElements) {
-        const shape = pageElement.shape as JsonMap | undefined;
-        const text = shape?.text as JsonMap | undefined;
-        const elements = text?.textElements as JsonMap[] | undefined;
-
-        if (!Array.isArray(elements)) continue;
-
-        for (const element of elements) {
-          const run = element.textRun as JsonMap | undefined;
-          const content = run?.content;
-          if (typeof content === "string") chunks.push(content);
-        }
-      }
-    }
-
-    return {
-      slideId: typeof slide.objectId === "string" ? slide.objectId : `slide-${index + 1}`,
-      index: index + 1,
-      text: chunks.join("").trim(),
-    };
-  });
-}
-
-function authUrl(config: { clientId: string; redirectUri: string; state: string }) {
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", config.clientId);
-  url.searchParams.set("redirect_uri", config.redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", OAUTH_SCOPE);
-  url.searchParams.set("access_type", "offline");
-  url.searchParams.set("prompt", "consent");
-  url.searchParams.set("state", config.state);
-  return url.toString();
-}
-
-async function waitForAuthCode(redirectUri: string, expectedState: string, timeoutMs = 180_000): Promise<string> {
+export async function waitForAuthCode(
+  redirectUri: string,
+  expectedState: string,
+  timeoutMs = 180_000,
+  onListening?: (port: number) => void,
+): Promise<string> {
   const callback = new URL(redirectUri);
   const host = callback.hostname;
   const port = Number(callback.port || (callback.protocol === "https:" ? 443 : 80));
@@ -611,7 +314,10 @@ async function waitForAuthCode(redirectUri: string, expectedState: string, timeo
       }
     });
 
-    server.listen(port, host, () => undefined);
+    server.listen(port, host, () => {
+      const address = server.address();
+      if (typeof address === "object" && address) onListening?.(address.port);
+    });
     server.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -619,7 +325,7 @@ async function waitForAuthCode(redirectUri: string, expectedState: string, timeo
   });
 }
 
-async function exchangeCodeForToken(params: {
+export async function exchangeCodeForToken(params: {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
@@ -658,7 +364,7 @@ async function exchangeCodeForToken(params: {
   } satisfies OAuthTokens;
 }
 
-async function openBrowser(pi: ExtensionAPI, url: string) {
+export async function openBrowser(pi: ExtensionAPI, url: string) {
   const platform = process.platform;
 
   if (platform === "darwin") {
@@ -674,7 +380,12 @@ async function openBrowser(pi: ExtensionAPI, url: string) {
   await pi.exec("xdg-open", [url]);
 }
 
-export default function googleWorkspaceExtension(pi: ExtensionAPI) {
+export type ExtensionDependencies = {
+  openBrowser?: typeof openBrowser;
+  waitForAuthCode?: typeof waitForAuthCode;
+};
+
+export default function googleWorkspaceExtension(pi: ExtensionAPI, dependencies: ExtensionDependencies = {}) {
   pi.registerCommand("gws-setup", {
     description: "Configure Google Workspace OAuth (personal account)",
     handler: async (_args, ctx) => {
@@ -704,17 +415,22 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         return;
       }
 
-      if (!["http:", "https:"].includes(parsedRedirect.protocol)) {
-        ctx.ui.notify("Redirect URI must use http or https.", "error");
+      if (parsedRedirect.protocol !== "http:") {
+        ctx.ui.notify("Redirect URI must use http.", "error");
+        return;
+      }
+
+      if (!["127.0.0.1", "localhost", "::1"].includes(parsedRedirect.hostname)) {
+        ctx.ui.notify("Redirect URI must use a loopback host (127.0.0.1, localhost, or ::1).", "error");
         return;
       }
 
       const state = randomBytes(12).toString("hex");
-      const url = authUrl({ clientId: clientId.trim(), redirectUri, state });
+      const url = authUrl({ clientId: clientId.trim(), redirectUri, state }, OAUTH_SCOPE);
 
       ctx.ui.notify("Opening your browser to start Google authentication...", "info");
       try {
-        await openBrowser(pi, url);
+        await (dependencies.openBrowser ?? openBrowser)(pi, url);
       } catch {
         ctx.ui.notify("Failed to open browser automatically. Open this URL manually:", "warning");
         ctx.ui.notify(url, "info");
@@ -722,7 +438,7 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
 
       let code = "";
       try {
-        code = await waitForAuthCode(redirectUri, state);
+        code = await (dependencies.waitForAuthCode ?? waitForAuthCode)(redirectUri, state);
       } catch (error) {
         ctx.ui.notify(`Automatic callback failed: ${(error as Error).message}`, "warning");
         const manualCode = await ctx.ui.input("Paste the authorization code", "4/0A...");
@@ -1475,21 +1191,16 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI) {
         }
       }
 
-      const lines = objects.map((obj) => {
-        if (obj.kind === "chart") {
-          return [
-            `- chart \`${obj.title || "(untitled)"}\``,
-            `  - objectId: ${obj.objectId}`,
-            `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
-            `  - type: ${obj.chartType ?? "?"}`,
-            `  - series: ${obj.seriesCount}`,
-            obj.anchorRow !== null ? `  - anchor: row ${obj.anchorRow}, col ${obj.anchorCol}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n");
-        }
-        return `- ${String(obj.kind)} on ${obj.sheetTitle} (sheetId ${obj.sheetId})`;
-      });
+      const lines = objects.map((obj) => [
+        `- chart \`${obj.title || "(untitled)"}\``,
+        `  - objectId: ${obj.objectId}`,
+        `  - sheet: ${obj.sheetTitle} (sheetId ${obj.sheetId})`,
+        `  - type: ${obj.chartType ?? "?"}`,
+        `  - series: ${obj.seriesCount}`,
+        obj.anchorRow !== null ? `  - anchor: row ${obj.anchorRow}, col ${obj.anchorCol}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"));
 
       return {
         content: [
