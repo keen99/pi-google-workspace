@@ -487,6 +487,87 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI, dependencies:
     },
   });
 
+  pi.registerCommand("google-login", {
+    description: "Reload expired Google Workspace token (refresh first, re-authenticate if needed)",
+    handler: async (_args, ctx) => {
+      const existing = await readConfig();
+      if (!existing) {
+        ctx.ui.notify(`Not configured. Run /gws-setup first. (${CONFIG_PATH})`, "error");
+        return;
+      }
+
+      // Fast path: refresh_token present -> try silent refresh, no browser needed.
+      if (existing.tokens.refresh_token) {
+        try {
+          const refreshed = await refreshToken(existing);
+          ctx.ui.notify(
+            `Token refreshed. Valid until ${new Date(refreshed.tokens.expiry_date ?? Date.now()).toISOString()}.`,
+            "info",
+          );
+          return;
+        } catch (error) {
+          ctx.ui.notify(`Token refresh failed: ${(error as Error).message}`, "warning");
+          ctx.ui.notify("Falling back to full re-authentication in browser...", "info");
+        }
+      } else {
+        ctx.ui.notify("No refresh_token stored. Full re-authentication required.", "warning");
+      }
+
+      // Slow path: re-run OAuth code flow with the existing client + redirect,
+      // printing the auth URL so it can be pasted into a browser manually.
+      const state = randomBytes(12).toString("hex");
+      const url = authUrl(
+        { clientId: existing.clientId, redirectUri: existing.redirectUri, state },
+        OAUTH_SCOPE,
+      );
+
+      ctx.ui.notify("Opening your browser to re-authenticate...", "info");
+      ctx.ui.notify(
+        "If the browser does not open, paste this URL into a browser:",
+        "info",
+      );
+      ctx.ui.notify(url, "info");
+
+      try {
+        await (dependencies.openBrowser ?? openBrowser)(pi, url);
+      } catch {
+        ctx.ui.notify("Auto browser open failed. Use the URL above manually.", "warning");
+      }
+
+      let code = "";
+      try {
+        code = await (dependencies.waitForAuthCode ?? waitForAuthCode)(existing.redirectUri, state);
+      } catch (error) {
+        ctx.ui.notify(`Automatic callback failed: ${(error as Error).message}`, "warning");
+        const manualCode = await ctx.ui.input("Paste the authorization code", "4/0A...");
+        if (!manualCode) return;
+        code = manualCode.trim();
+      }
+
+      try {
+        const tokens = await exchangeCodeForToken({
+          clientId: existing.clientId,
+          clientSecret: existing.clientSecret,
+          redirectUri: existing.redirectUri,
+          code,
+        });
+
+        const config: AuthConfig = {
+          ...existing,
+          tokens: {
+            ...tokens,
+            refresh_token: tokens.refresh_token ?? existing.tokens.refresh_token,
+          },
+        };
+
+        await saveConfig(config);
+        ctx.ui.notify(`Re-authentication complete. Token saved: ${CONFIG_PATH}`, "info");
+      } catch (error) {
+        ctx.ui.notify(`Re-authentication failed: ${(error as Error).message}`, "error");
+      }
+    },
+  });
+
   pi.registerTool({
     name: "google_workspace_status",
     label: "Google Workspace Status",

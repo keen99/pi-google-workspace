@@ -58,10 +58,10 @@ beforeEach(() => {
 });
 
 describe("extension registration", () => {
-  it("registers 2 commands", () => {
+  it("registers 3 commands", () => {
     const { pi, commands } = fakePi();
     googleWorkspaceExtension(pi);
-    expect(commands.map((c) => c.name).sort()).toEqual(["gws-logout", "gws-setup"]);
+    expect(commands.map((c) => c.name).sort()).toEqual(["google-login", "gws-logout", "gws-setup"]);
   });
 
   it("registers 20 tools", () => {

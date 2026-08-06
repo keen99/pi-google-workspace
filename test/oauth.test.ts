@@ -268,3 +268,87 @@ describe("OAuth commands", () => {
     expect(h.notifications).toContainEqual(["Deletion failed: permission denied", "error"]);
   });
 });
+
+describe("google-login command", () => {
+  const existingConfig = {
+    clientId: "CID",
+    clientSecret: "SECRET",
+    redirectUri: "http://127.0.0.1:53682/cb",
+    tokens: { access_token: "OLD", refresh_token: "REFRESH", expiry_date: 1 },
+  };
+
+  it("errors when no configuration exists", async () => {
+    fsMocks.readFile.mockRejectedValue(new Error("ENOENT"));
+    const h = commandHarness();
+    await h.commands.get("google-login")!.handler("", h.ctx);
+    expect(h.notifications.some(([text, level]) => text.includes("Not configured") && level === "error")).toBe(true);
+    expect(h.exec).not.toHaveBeenCalled();
+  });
+
+  it("refreshes silently when refresh_token present", async () => {
+    fsMocks.readFile.mockResolvedValue(JSON.stringify(existingConfig));
+    const h = commandHarness();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response(200, { access_token: "NEW", expires_in: 3600 }),
+    );
+
+    await h.commands.get("google-login")!.handler("", h.ctx);
+
+    expect(h.exec).not.toHaveBeenCalled();
+    expect(fsMocks.writeFile).toHaveBeenCalledOnce();
+    const saved = JSON.parse(fsMocks.writeFile.mock.calls[0][1]);
+    expect(saved.tokens.access_token).toBe("NEW");
+    expect(saved.tokens.refresh_token).toBe("REFRESH");
+    expect(h.notifications.some(([text]) => text.includes("Token refreshed"))).toBe(true);
+  });
+
+  it("falls back to re-auth flow when refresh fails", async () => {
+    fsMocks.readFile.mockResolvedValue(JSON.stringify(existingConfig));
+    const callback = vi.fn().mockResolvedValue("CODE");
+    const h = commandHarness([" MANUAL_CODE "], [], { waitForAuthCode: callback });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(400, { error_description: "invalid_grant" }))
+      .mockResolvedValueOnce(response(200, { access_token: "NEW", refresh_token: "NEW_REFRESH", expires_in: 3600 }));
+
+    await h.commands.get("google-login")!.handler("", h.ctx);
+
+    expect(h.notifications.some(([text]) => text.includes("Token refresh failed"))).toBe(true);
+    expect(h.notifications.some(([text, level]) => text.includes("paste this URL") && level === "info")).toBe(true);
+    expect(callback).toHaveBeenCalledWith("http://127.0.0.1:53682/cb", expect.any(String));
+    const saved = JSON.parse(fsMocks.writeFile.mock.calls[0][1]);
+    expect(saved.tokens.refresh_token).toBe("NEW_REFRESH");
+    expect(h.notifications.some(([text]) => text.includes("Re-authentication complete"))).toBe(true);
+  });
+
+  it("prints auth URL when no refresh_token stored", async () => {
+    fsMocks.readFile.mockResolvedValue(
+      JSON.stringify({ ...existingConfig, tokens: { access_token: "OLD", expiry_date: 1 } }),
+    );
+    const callback = vi.fn().mockResolvedValue("CODE");
+    const h = commandHarness([], [], { waitForAuthCode: callback });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response(200, { access_token: "NEW", expires_in: 3600 }),
+    );
+
+    await h.commands.get("google-login")!.handler("", h.ctx);
+
+    expect(h.notifications.some(([text]) => text.includes("No refresh_token stored"))).toBe(true);
+    expect(h.notifications.some(([text, level]) => text.includes("paste this URL") && level === "info")).toBe(true);
+    expect(callback).toHaveBeenCalled();
+  });
+
+  it("preserves existing refresh_token when re-auth omits one", async () => {
+    fsMocks.readFile.mockResolvedValue(JSON.stringify(existingConfig));
+    const callback = vi.fn().mockResolvedValue("CODE");
+    const h = commandHarness([], [], { waitForAuthCode: callback });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(400, { error_description: "invalid_grant" }))
+      .mockResolvedValueOnce(response(200, { access_token: "NEW", expires_in: 3600 }));
+
+    await h.commands.get("google-login")!.handler("", h.ctx);
+
+    const saved = JSON.parse(fsMocks.writeFile.mock.calls[0][1]);
+    expect(saved.tokens.access_token).toBe("NEW");
+    expect(saved.tokens.refresh_token).toBe("REFRESH");
+  });
+});
