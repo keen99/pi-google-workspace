@@ -47,7 +47,7 @@ jobs:
           cache: npm
       - run: npm ci
       # Restore the newest saved .matrix-cache; save an updated one on success.
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .matrix-cache
           key: pi-matrix-${{ github.run_id }}
