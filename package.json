@@ -47,7 +47,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "bash check.sh"
+    "check": "bash check.sh",
+    "test:matrix": "node test/release-matrix.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

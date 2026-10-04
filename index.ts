@@ -386,6 +386,18 @@ export type ExtensionDependencies = {
 };
 
 export default function googleWorkspaceExtension(pi: ExtensionAPI, dependencies: ExtensionDependencies = {}) {
+  if (process.env.GOOGLE_WS_DEBUG === "1") {
+    (async () => {
+      try {
+        const { homedir } = await import("node:os");
+        const p = await import("node:path");
+        const agentDir = process.env.PI_CODING_AGENT_DIR || p.join(homedir(), ".pi", "agent");
+        const fsp = await import("node:fs/promises");
+        await fsp.mkdir(agentDir, { recursive: true });
+        await fsp.writeFile(p.join(agentDir, "gws-loaded.json"), JSON.stringify({ loaded: true }) + "\n");
+      } catch { /* debug marker best-effort */ }
+    })();
+  }
   pi.registerCommand("gws-setup", {
     description: "Configure Google Workspace OAuth (personal account)",
     handler: async (_args, ctx) => {

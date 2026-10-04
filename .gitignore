@@ -14,3 +14,5 @@ oauth.json
 coverage/
 .nyc_output/
 *.lcov
+.matrix-cache
+coverage/

@@ -1,5 +1,9 @@
 # pi Google Workspace Extension
 
+![CI](https://github.com/keen99/pi-google-workspace/actions/workflows/ci.yml/badge.svg)
+![release-watch](https://github.com/keen99/pi-google-workspace/actions/workflows/release-watch.yml/badge.svg)
+[![pi tested](https://img.shields.io/github/v/release/keen99/pi-google-workspace?label=pi%20tested%200.75.0%20%E2%86%92)](https://github.com/keen99/pi-google-workspace/releases)
+
 Google Workspace extension for [pi](https://github.com/badlogic/pi-mono):
 - Google Drive (list, upload, download, create folder)
 - Google Docs (read, create, append, replace, export)
@@ -11,7 +15,16 @@ Google Workspace extension for [pi](https://github.com/badlogic/pi-mono):
 
 ### npm
 ```bash
+```bash
+# npm registry
 pi install npm:pi-google-workspace
+
+# ssh
+pi install git:git@github.com:keen99/pi-google-workspace
+
+# https
+pi install git:github.com/keen99/pi-google-workspace
+```
 ```
 
 Then run:
@@ -150,6 +163,13 @@ The package gallery reads npm packages that include the `pi-package` keyword.
 - Re-run setup after scope changes: `/gws-setup`
 
 ## Testing
+
+The release matrix boots each pinned pi release (>= 0.75.0) in RPC mode
+with the extension loaded and asserts the load marker on the real
+process; the vitest suite covers OAuth, tool logic, and platform glue.
+`GOOGLE_WS_DEBUG=1` writes the load marker; `PI_TEST_BIN` overrides
+the pi binary. Cached pi installs live in `.matrix-cache/` and are
+reused across runs.
 
 Full TDD test suite via [vitest](https://vitest.dev/). Three layers:
 
